@@ -1,0 +1,10 @@
+# Backup files are typically too large for git; host on a GitHub Release instead
+FalconTemplate.bak
+*.bak
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
