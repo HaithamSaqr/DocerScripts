@@ -1,0 +1,128 @@
+FALCON_CLIENT=customername \
+FALCON_DB=databasename \
+FALCON_PASSWORD='sqlpass' \
+FALCON_PORT=5780 \
+FALCON_YES=1 \
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
+
+
+
+
+
+# تشغيل
+(cd /opt/<client> && sudo docker compose up -d)
+
+# إيقاف
+(cd /opt/<client> && sudo docker compose down)
+
+# اللوجز
+sudo docker logs -f <client>
+
+# حذف نهائي للعميل (احذر — هتمسح بياناته)
+(cd /opt/<client> && sudo docker compose down -v)
+sudo rm -rf /opt/<client>
+
+
+
+
+bakup
+
+CLIENT=binmesaad
+DB=binmesaad
+SA_PASS='F@lcon@0401!@#@@ForFalconDbP@ss'
+
+sudo docker exec ${CLIENT} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "${SA_PASS}" \
+  -Q "BACKUP DATABASE [${DB}] TO DISK = N'/var/opt/mssql/backup/${DB}_before_upgrade_$(date +%Y%m%d_%H%M%S).bak' WITH INIT, COMPRESSION"
+
+
+
+update
+
+CLIENT=binmesaad
+
+# Backup
+sudo docker exec ${CLIENT} /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$SA_PASS" \
+  -Q "BACKUP DATABASE [binmesaad] TO DISK = N'/var/opt/mssql/backup/pre_upgrade.bak' WITH INIT, COMPRESSION"
+
+# Upgrade
+cd /opt/${CLIENT}
+sudo docker compose pull
+sudo docker compose up -d
+sudo docker logs -f ${CLIENT}    # Ctrl+C لما تشوف "ready for client connections"
+
+
+Falcon
+
+/////
+
+
+عميل جديد كامل (SQL + App):
+
+
+FALCON_MODE=full \
+FALCON_CLIENT=binmesaad \
+FALCON_DB=binmesaad \
+FALCON_PASSWORD='DbP@ss' \
+FALCON_PORT=5780 \
+FALCON_API_PORT=5011 \
+FALCON_FRONT_PORT=5023 \
+FALCON_API_URL='https://appapi.client.com/api' \
+FALCON_YES=1 \
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/falconclouderp/run.sh)
+
+
+
+عميل App فقط (متوصل بـ SQL موجود):
+
+FALCON_MODE=app \
+FALCON_CLIENT=binmesaad \
+FALCON_SQL_HOST=213.199.62.187 \
+FALCON_SQL_PORT=5778 \
+FALCON_DB=FalconCloudERPDBDemo \
+FALCON_SQL_USER=Falconsa \
+FALCON_SQL_PASS='DbP@ss' \
+FALCON_API_PORT=5011 \
+FALCON_FRONT_PORT=5023 \
+FALCON_API_URL='https://appapi.client.com/api' \
+FALCON_YES=1 \
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/falconclouderp/run.sh)
+
+
+
+
+update falcon 
+
+ نزّل آخر نسخة من الـ images
+
+cd /opt/${CLIENT}
+sudo docker compose pull
+
+
+
+
+تحديث خدمة واحدة بس (بدون لمس الباقي)
+
+
+
+cd /opt/${CLIENT}
+
+# الـ API فقط
+sudo docker compose pull ${CLIENT}_api
+sudo docker compose up -d ${CLIENT}_api
+
+# الـ Frontend فقط
+sudo docker compose pull ${CLIENT}_front
+sudo docker compose up -d ${CLIENT}_front
+
+
+تحديث متعدد العملاء على نفس السيرفر
+
+for CLIENT in binmesaad alfa_trade escan_const; do
+    echo "=== Upgrading $CLIENT ==="
+    cd /opt/${CLIENT}
+    sudo docker compose pull
+    sudo docker compose up -d
+    sleep 5
+    sudo docker compose ps
+done
+
