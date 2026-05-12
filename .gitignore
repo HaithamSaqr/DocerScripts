@@ -1,6 +1,9 @@
-# Backup files are typically too large for git; host on a GitHub Release instead
-FalconTemplate.bak
+# Loose backup files anywhere in the tree are ignored to prevent accidental commits
 *.bak
+
+# Exception: the canonical template backup lives in the repo so run.sh can
+# materialize a client environment without any external download step.
+!opt/FalconTemplate/sql/backup/*.bak
 
 # OS / editor noise
 .DS_Store

@@ -8,30 +8,82 @@ One-shot provisioner that:
 
 ## One-line run from GitHub
 
+### Interactive (asks for every value)
+
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/run.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
 ```
 
-The script will prompt for:
-
-- **Client name** — used as container name and as the root folder under `/opt`
-- **Database name** — the name the restored database will be registered as
-- **SA password** — must satisfy MSSQL complexity rules
-- **Host port** — exposed on the host, mapped to `1433` inside the container (default `5779`)
-
-## Backup file
-
-The script looks for the backup file in this order:
-
-1. `./FalconTemplate.bak` in the current directory (use this when running locally)
-2. `FALCON_BACKUP_URL` environment variable
-3. `<FALCON_REPO_RAW_URL>/FalconTemplate.bak` (defaults to the raw URL of this repo)
-
-For files larger than 100 MB, host the `.bak` outside the repo (e.g. a GitHub Release asset or object storage) and point `FALCON_BACKUP_URL` at it:
+### Non-interactive (everything in one command — no prompts)
 
 ```bash
-FALCON_BACKUP_URL="https://github.com/<user>/<repo>/releases/download/v1/FalconTemplate.bak" \
-  bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/run.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh) \
+  --client escan_const --db escandb --password 'S0meStr0ng!Pass' --port 5779 --yes
+```
+
+Or using env vars (better — the password stays out of `history` and `ps`):
+
+```bash
+FALCON_CLIENT=escan_const \
+FALCON_DB=escandb \
+FALCON_PASSWORD='S0meStr0ng!Pass' \
+FALCON_PORT=5779 \
+FALCON_YES=1 \
+  bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
+```
+
+### Inputs
+
+The script prompts for any value not supplied via flag or env var:
+
+| Prompt | Flag | Env var |
+|---|---|---|
+| Client name (container + `/opt/<x>` folder) | `-c`, `--client` | `FALCON_CLIENT` |
+| Database name (after restore) | `-d`, `--db` | `FALCON_DB` |
+| SA password (MSSQL complexity rules) | `-p`, `--password` | `FALCON_PASSWORD` |
+| Host port mapped to container `1433` | `-P`, `--port` | `FALCON_PORT` |
+| Skip the final confirmation prompt | `-y`, `--yes` | `FALCON_YES=1` |
+
+## Backup file lives in the repo
+
+The folder structure (and the backup itself) is committed to the repo at:
+
+```
+opt/FalconTemplate/sql/
+├── data/.gitkeep         <- empty, materializes /opt/<client>/sql/data/
+├── log/.gitkeep          <- empty, materializes /opt/<client>/sql/log/
+└── backup/
+    ├── README.md
+    └── FalconTemplate.bak    <- you commit this
+```
+
+When `run.sh` runs, it:
+
+1. Downloads the whole branch as a tarball from `https://github.com/<owner>/<repo>/archive/refs/heads/<branch>.tar.gz`
+2. Extracts the tarball to a temp directory
+3. Copies `opt/FalconTemplate/sql/` to `/opt/<client>/sql/` on the server
+4. The `.bak` is already inside `/opt/<client>/sql/backup/` after the copy — no extra download needed
+5. The container restore reads it from `/var/opt/mssql/backup/FalconTemplate.bak` via the bind mount
+
+To update the template, replace the file in the repo and push:
+
+```bash
+cp /path/to/new/FalconTemplate.bak opt/FalconTemplate/sql/backup/FalconTemplate.bak
+git add opt/FalconTemplate/sql/backup/FalconTemplate.bak
+git commit -m "Update FalconTemplate backup"
+git push origin sqlexpress25
+```
+
+### Size limit
+
+GitHub rejects any single file over 100 MB unless tracked with Git LFS. If your `.bak` is larger:
+
+```bash
+git lfs install
+git lfs track "*.bak"
+git add .gitattributes opt/FalconTemplate/sql/backup/FalconTemplate.bak
+git commit -m "Track backup with LFS"
+git push origin sqlexpress25
 ```
 
 ## Requirements on the host
@@ -82,10 +134,13 @@ sudo docker logs -f <client>
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `FALCON_REPO_RAW_URL` | `https://raw.githubusercontent.com/CHANGE_ME/CHANGE_ME/main` | Base URL when fetching the backup |
-| `FALCON_BACKUP_URL` | `${FALCON_REPO_RAW_URL}/FalconTemplate.bak` | Full URL to the backup file |
+| `FALCON_REPO_OWNER`  | `HaithamSaqr`  | GitHub owner of the repo |
+| `FALCON_REPO_NAME`   | `DocerScripts` | GitHub repo name |
+| `FALCON_REPO_BRANCH` | `sqlexpress25` | Branch to pull the tarball from |
+| `FALCON_TARBALL_URL` | `https://github.com/<owner>/<name>/archive/refs/heads/<branch>.tar.gz` | Override the full tarball URL (e.g. for a tag) |
+| `FALCON_TEMPLATE_PATH` | `opt/FalconTemplate/sql` | Path inside the repo to copy to `/opt/<client>/sql/` |
 | `FALCON_MSSQL_IMAGE` | `mcr.microsoft.com/mssql/server:2025-latest` | MSSQL container image |
-| `FALCON_MSSQL_PID` | `Express` | MSSQL edition (`Express`, `Developer`, `Standard`, `Enterprise`) |
+| `FALCON_MSSQL_PID`   | `Express` | MSSQL edition (`Express`, `Developer`, `Standard`, `Enterprise`) |
 | `FALCON_WAIT_SECONDS` | `90` | Max seconds to wait for SQL Server readiness |
 
 ## Notes

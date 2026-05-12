@@ -1,19 +1,83 @@
 #!/usr/bin/env bash
 # Falcon MSSQL Container Provisioner
-# Usage (one-liner from GitHub):
-#   bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/run.sh)
-# Or after cloning:
-#   chmod +x run.sh && ./run.sh
+#
+# Interactive (asks for everything):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/<branch>/run.sh)
+#
+# One-shot with flags (no prompts):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/<branch>/run.sh) \
+#     --client escan_const --db escandb --password 'S0meStr0ng!Pass' --port 5779 --yes
+#
+# Or with env vars:
+#   FALCON_CLIENT=escan_const FALCON_DB=escandb \
+#   FALCON_PASSWORD='S0meStr0ng!Pass' FALCON_PORT=5779 FALCON_YES=1 \
+#     bash <(curl -fsSL .../run.sh)
+#
+# Flags > env vars > interactive prompt.
 
 set -euo pipefail
 
 # ---------- configuration ----------
-REPO_RAW_URL="${FALCON_REPO_RAW_URL:-https://raw.githubusercontent.com/CHANGE_ME/CHANGE_ME/main}"
+REPO_OWNER="${FALCON_REPO_OWNER:-HaithamSaqr}"
+REPO_NAME="${FALCON_REPO_NAME:-DocerScripts}"
+REPO_BRANCH="${FALCON_REPO_BRANCH:-sqlexpress25}"
+TARBALL_URL="${FALCON_TARBALL_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz}"
+TEMPLATE_PATH_IN_REPO="${FALCON_TEMPLATE_PATH:-opt/FalconTemplate/sql}"
 BACKUP_FILE_NAME="FalconTemplate.bak"
-BACKUP_URL="${FALCON_BACKUP_URL:-${REPO_RAW_URL}/${BACKUP_FILE_NAME}}"
 MSSQL_IMAGE="${FALCON_MSSQL_IMAGE:-mcr.microsoft.com/mssql/server:2025-latest}"
 MSSQL_PID="${FALCON_MSSQL_PID:-Express}"
 WAIT_SECONDS="${FALCON_WAIT_SECONDS:-90}"
+
+# ---------- CLI args ----------
+CLI_CLIENT=""
+CLI_DB=""
+CLI_PASSWORD=""
+CLI_PORT=""
+ASSUME_YES="${FALCON_YES:-0}"
+
+usage() {
+    cat <<EOF
+Usage: run.sh [options]
+
+Options:
+  -c, --client    NAME      Client name (container + folder name)
+  -d, --db        NAME      Database name after restore
+  -p, --password  SECRET    SA password (avoid shell history — prefer env var)
+  -P, --port      PORT      Host port to expose (default: 5779)
+  -y, --yes                 Skip the final confirmation prompt
+  -h, --help                Show this help
+
+Env vars (used when the matching flag is omitted):
+  FALCON_CLIENT, FALCON_DB, FALCON_PASSWORD, FALCON_PORT, FALCON_YES
+  FALCON_BACKUP_URL, FALCON_REPO_RAW_URL, FALCON_MSSQL_IMAGE,
+  FALCON_MSSQL_PID, FALCON_WAIT_SECONDS
+
+Example (fully non-interactive):
+  ./run.sh -c escan_const -d escandb -p 'S0meStr0ng!Pass' -P 5779 -y
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--client)    CLI_CLIENT="$2";   shift 2 ;;
+        -d|--db)        CLI_DB="$2";       shift 2 ;;
+        -p|--password)  CLI_PASSWORD="$2"; shift 2 ;;
+        -P|--port)      CLI_PORT="$2";     shift 2 ;;
+        -y|--yes)       ASSUME_YES=1;      shift ;;
+        -h|--help)      usage; exit 0 ;;
+        --client=*)     CLI_CLIENT="${1#*=}";   shift ;;
+        --db=*)         CLI_DB="${1#*=}";       shift ;;
+        --password=*)   CLI_PASSWORD="${1#*=}"; shift ;;
+        --port=*)       CLI_PORT="${1#*=}";     shift ;;
+        *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
+    esac
+done
+
+# Precedence: flag > env var > empty (will trigger prompt)
+CLIENT_NAME="${CLI_CLIENT:-${FALCON_CLIENT:-}}"
+DB_NAME="${CLI_DB:-${FALCON_DB:-}}"
+SA_PASSWORD="${CLI_PASSWORD:-${FALCON_PASSWORD:-}}"
+HOST_PORT="${CLI_PORT:-${FALCON_PORT:-}}"
 
 # ---------- colors ----------
 if [[ -t 1 ]]; then
@@ -71,10 +135,10 @@ prompt_secret() {
     printf -v "$var_name" '%s' "$value"
 }
 
-prompt_required CLIENT_NAME   "Client name (used for container + folder name)"
-prompt_required DB_NAME       "Database name (target name after restore)"
-prompt_secret   SA_PASSWORD   "SA password (min 8 chars, mixed complexity)"
-prompt_required HOST_PORT     "Host port to expose (e.g. 5779)" "5779"
+[[ -z "$CLIENT_NAME" ]] && prompt_required CLIENT_NAME "Client name (used for container + folder name)"
+[[ -z "$DB_NAME"     ]] && prompt_required DB_NAME     "Database name (target name after restore)"
+[[ -z "$SA_PASSWORD" ]] && prompt_secret   SA_PASSWORD "SA password (min 8 chars, mixed complexity)"
+[[ -z "$HOST_PORT"   ]] && prompt_required HOST_PORT   "Host port to expose (e.g. 5779)" "5779"
 
 # sanitize client name to a safe identifier (letters, digits, underscore, dash)
 SAFE_CLIENT="$(echo "$CLIENT_NAME" | tr -c 'A-Za-z0-9_-' '_' | sed 's/^_*//; s/_*$//')"
@@ -99,32 +163,61 @@ echo "  Backup dir     : ${BACKUP_DIR}"
 echo "  MSSQL image    : ${MSSQL_IMAGE}"
 echo "  Edition (PID)  : ${MSSQL_PID}"
 echo
-read -r -p "Proceed? [y/N] " CONFIRM
-[[ "${CONFIRM,,}" == "y" || "${CONFIRM,,}" == "yes" ]] || die "Aborted."
-
-# ---------- folder layout ----------
-info "Creating folder layout under ${BASE_DIR} ..."
-sudo mkdir -p "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR"
-ok "Folders created."
-
-# ---------- fetch backup file ----------
-LOCAL_BACKUP_SRC=""
-if [[ -f "./${BACKUP_FILE_NAME}" ]]; then
-    LOCAL_BACKUP_SRC="./${BACKUP_FILE_NAME}"
-    info "Using local backup: ${LOCAL_BACKUP_SRC}"
+if [[ "$ASSUME_YES" == "1" || "${ASSUME_YES,,}" == "true" || "${ASSUME_YES,,}" == "yes" ]]; then
+    info "Auto-confirming (--yes)."
 else
-    info "Downloading backup from ${BACKUP_URL} ..."
-    TMP_BACKUP="$(mktemp -t falcon_backup_XXXXXX.bak)"
-    if ! curl -fL --progress-bar -o "$TMP_BACKUP" "$BACKUP_URL"; then
-        rm -f "$TMP_BACKUP"
-        die "Failed to download ${BACKUP_URL}. Place ${BACKUP_FILE_NAME} next to run.sh or set FALCON_BACKUP_URL."
-    fi
-    LOCAL_BACKUP_SRC="$TMP_BACKUP"
+    read -r -p "Proceed? [y/N] " CONFIRM
+    [[ "${CONFIRM,,}" == "y" || "${CONFIRM,,}" == "yes" ]] || die "Aborted."
 fi
 
-info "Copying backup into ${BACKUP_DIR}/${BACKUP_FILE_NAME} ..."
-sudo cp "$LOCAL_BACKUP_SRC" "${BACKUP_DIR}/${BACKUP_FILE_NAME}"
-ok "Backup staged."
+# ---------- materialize folder layout from repo tarball ----------
+# The repo carries the canonical folder template at:
+#   opt/FalconTemplate/sql/{data,log,backup}
+# with FalconTemplate.bak already inside backup/. We download the whole branch
+# as a tarball, extract it, and copy that subtree to /opt/<client>/sql/. The
+# restore step later reads the backup from /var/opt/mssql/backup/ inside the
+# container (which is bind-mounted to /opt/<client>/sql/backup/ on the host).
+info "Downloading repo tarball: ${TARBALL_URL}"
+TMP_REPO_ROOT="$(mktemp -d -t falcon_repo_XXXXXX)"
+trap 'rm -rf "$TMP_REPO_ROOT"' EXIT
+
+if ! curl -fL --progress-bar -o "${TMP_REPO_ROOT}/repo.tar.gz" "$TARBALL_URL"; then
+    die "Failed to download tarball from ${TARBALL_URL}"
+fi
+# --strip-components=1 drops the top-level "<repo>-<branch>/" prefix
+tar -xzf "${TMP_REPO_ROOT}/repo.tar.gz" -C "$TMP_REPO_ROOT" --strip-components=1 \
+    || die "Failed to extract repo tarball."
+ok "Repo extracted to ${TMP_REPO_ROOT}"
+
+SOURCE_TEMPLATE="${TMP_REPO_ROOT}/${TEMPLATE_PATH_IN_REPO}"
+[[ -d "$SOURCE_TEMPLATE" ]] || die "Template folder not found in repo at: ${TEMPLATE_PATH_IN_REPO}"
+
+SOURCE_BACKUP="${SOURCE_TEMPLATE}/backup/${BACKUP_FILE_NAME}"
+if [[ ! -f "$SOURCE_BACKUP" ]]; then
+    die "Backup file is missing in the repo at: ${TEMPLATE_PATH_IN_REPO}/backup/${BACKUP_FILE_NAME}
+Commit your ${BACKUP_FILE_NAME} into the repo first:
+  cp /path/to/${BACKUP_FILE_NAME} opt/FalconTemplate/sql/backup/
+  git add opt/FalconTemplate/sql/backup/${BACKUP_FILE_NAME}
+  git commit -m 'Add template backup'
+  git push origin ${REPO_BRANCH}"
+fi
+
+BACKUP_SIZE_HUMAN="$(du -h "$SOURCE_BACKUP" | cut -f1)"
+info "Template backup found (${BACKUP_SIZE_HUMAN})."
+
+info "Materializing ${BASE_DIR}/sql/ from repo template ..."
+sudo mkdir -p "$BASE_DIR"
+# Copy the entire sql/ tree (data/, log/, backup/<bak>) preserving structure.
+# We use rsync if available for clearer progress, falling back to cp -r.
+if command -v rsync >/dev/null 2>&1; then
+    sudo rsync -a --delete "${SOURCE_TEMPLATE}/" "${BASE_DIR}/sql/"
+else
+    sudo rm -rf "${BASE_DIR}/sql"
+    sudo cp -r "${SOURCE_TEMPLATE}" "${BASE_DIR}/sql"
+fi
+# Strip the marker files git used to keep empty folders alive
+sudo rm -f "${BASE_DIR}/sql/data/.gitkeep" "${BASE_DIR}/sql/log/.gitkeep" "${BASE_DIR}/sql/backup/README.md"
+ok "Folder structure materialized with backup staged at ${BACKUP_DIR}/${BACKUP_FILE_NAME}"
 
 # ---------- write docker-compose.yml ----------
 COMPOSE_FILE="${BASE_DIR}/docker-compose.yml"
