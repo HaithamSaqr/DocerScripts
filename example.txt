@@ -1,7 +1,7 @@
-FALCON_CLIENT=customername \
-FALCON_DB=databasename \
-FALCON_PASSWORD='sqlpass' \
-FALCON_PORT=5780 \
+FALCON_CLIENT=level \
+FALCON_DB=levelDemo \
+FALCON_PASSWORD='F@lcon@0401!@#@@ForFalconDbP@ss' \
+FALCON_PORT=5781 \
 FALCON_YES=1 \
 bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
 
