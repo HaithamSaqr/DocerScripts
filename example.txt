@@ -1,11 +1,18 @@
-FALCON_CLIENT=level \
-FALCON_DB=levelDemo \
-FALCON_PASSWORD='F@lcon@0401!@#@@ForFalconDbP@ss' \
-FALCON_PORT=5781 \
+FALCON_CLIENT=sql \
+FALCON_DB=demodb \
+FALCON_PASSWORD='P@ss@123321123' \
+FALCON_PORT=5777 \
 FALCON_YES=1 \
 bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
 
 
+
+
+FALCON_CLIENT=sql \
+FALCON_PASSWORD='P@ss@123321123' \
+FALCON_PORT=5777 \
+FALCON_YES=1 \
+bash <(curl -fsSL https://raw.githubusercontent.com/HaithamSaqr/DocerScripts/sqlexpress25/run.sh)
 
 
 
